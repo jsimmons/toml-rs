@@ -286,17 +286,16 @@ impl<'a> Tokenizer<'a> {
         Comment(&self.input[start..self.current()])
     }
 
-    fn read_string(
+    fn read_string<F: FnMut(
+        &mut Tokenizer<'_>,
+        &mut MaybeString,
+        bool,
+        usize,
+        char)-> Result<(), Error>>(
         &mut self,
         delim: char,
         start: usize,
-        new_ch: &mut dyn FnMut(
-            &mut Tokenizer<'_>,
-            &mut MaybeString,
-            bool,
-            usize,
-            char,
-        ) -> Result<(), Error>,
+        new_ch: &mut F,
     ) -> Result<Token<'a>, Error> {
         let mut multiline = false;
         if self.eatc(delim) {
