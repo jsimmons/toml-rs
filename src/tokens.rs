@@ -23,9 +23,9 @@ impl From<Span> for (usize, usize) {
 
 #[derive(Eq, PartialEq, Debug)]
 pub enum Token<'a> {
-    Whitespace(&'a str),
+    Whitespace,
     Newline,
-    Comment(&'a str),
+    Comment,
 
     Equals,
     Period,
@@ -96,9 +96,9 @@ impl<'a> Tokenizer<'a> {
     pub fn next(&mut self) -> Result<Option<(Span, Token<'a>)>, Error> {
         let (start, token) = match self.one() {
             Some((start, '\n')) => (start, Newline),
-            Some((start, ' ')) => (start, self.whitespace_token(start)),
-            Some((start, '\t')) => (start, self.whitespace_token(start)),
-            Some((start, '#')) => (start, self.comment_token(start)),
+            Some((start, ' ')) => (start, self.whitespace_token()),
+            Some((start, '\t')) => (start, self.whitespace_token()),
+            Some((start, '#')) => (start, self.comment_token()),
             Some((start, '=')) => (start, Equals),
             Some((start, '.')) => (start, Period),
             Some((start, ',')) => (start, Comma),
@@ -222,7 +222,7 @@ impl<'a> Tokenizer<'a> {
         if !self.eatc('#') {
             return Ok(false);
         }
-        drop(self.comment_token(0));
+        drop(self.comment_token());
         self.eat_newline_or_eof().map(|()| true)
     }
 
@@ -269,29 +269,26 @@ impl<'a> Tokenizer<'a> {
         self.input
     }
 
-    fn whitespace_token(&mut self, start: usize) -> Token<'a> {
+    fn whitespace_token(&mut self) -> Token<'a> {
         while self.eatc(' ') || self.eatc('\t') {
             // ...
         }
-        Whitespace(&self.input[start..self.current()])
+        Whitespace
     }
 
-    fn comment_token(&mut self, start: usize) -> Token<'a> {
+    fn comment_token(&mut self) -> Token<'a> {
         while let Some((_, ch)) = self.chars.clone().next() {
             if ch != '\t' && (ch < '\u{20}' || ch > '\u{10ffff}') {
                 break;
             }
             self.one();
         }
-        Comment(&self.input[start..self.current()])
+        Comment
     }
 
-    fn read_string<F: FnMut(
-        &mut Tokenizer<'_>,
-        &mut MaybeString,
-        bool,
-        usize,
-        char)-> Result<(), Error>>(
+    fn read_string<
+        F: FnMut(&mut Tokenizer<'_>, &mut MaybeString, bool, usize, char) -> Result<(), Error>,
+    >(
         &mut self,
         delim: char,
         start: usize,
@@ -536,9 +533,9 @@ impl<'a> Token<'a> {
             Token::Keylike(_) => "an identifier",
             Token::Equals => "an equals",
             Token::Period => "a period",
-            Token::Comment(_) => "a comment",
+            Token::Comment => "a comment",
             Token::Newline => "a newline",
-            Token::Whitespace(_) => "whitespace",
+            Token::Whitespace => "whitespace",
             Token::Comma => "a comma",
             Token::RightBrace => "a right brace",
             Token::LeftBrace => "a left brace",
@@ -682,40 +679,40 @@ mod tests {
         t(
             " a ",
             &[
-                ((0, 1), Token::Whitespace(" "), " "),
+                ((0, 1), Token::Whitespace, " "),
                 ((1, 2), Token::Keylike("a"), "a"),
-                ((2, 3), Token::Whitespace(" "), " "),
+                ((2, 3), Token::Whitespace, " "),
             ],
         );
 
         t(
             " a\t [[]] \t [] {} , . =\n# foo \r\n#foo \n ",
             &[
-                ((0, 1), Token::Whitespace(" "), " "),
+                ((0, 1), Token::Whitespace, " "),
                 ((1, 2), Token::Keylike("a"), "a"),
-                ((2, 4), Token::Whitespace("\t "), "\t "),
+                ((2, 4), Token::Whitespace, "\t "),
                 ((4, 5), Token::LeftBracket, "["),
                 ((5, 6), Token::LeftBracket, "["),
                 ((6, 7), Token::RightBracket, "]"),
                 ((7, 8), Token::RightBracket, "]"),
-                ((8, 11), Token::Whitespace(" \t "), " \t "),
+                ((8, 11), Token::Whitespace, " \t "),
                 ((11, 12), Token::LeftBracket, "["),
                 ((12, 13), Token::RightBracket, "]"),
-                ((13, 14), Token::Whitespace(" "), " "),
+                ((13, 14), Token::Whitespace, " "),
                 ((14, 15), Token::LeftBrace, "{"),
                 ((15, 16), Token::RightBrace, "}"),
-                ((16, 17), Token::Whitespace(" "), " "),
+                ((16, 17), Token::Whitespace, " "),
                 ((17, 18), Token::Comma, ","),
-                ((18, 19), Token::Whitespace(" "), " "),
+                ((18, 19), Token::Whitespace, " "),
                 ((19, 20), Token::Period, "."),
-                ((20, 21), Token::Whitespace(" "), " "),
+                ((20, 21), Token::Whitespace, " "),
                 ((21, 22), Token::Equals, "="),
                 ((22, 23), Token::Newline, "\n"),
-                ((23, 29), Token::Comment("# foo "), "# foo "),
+                ((23, 29), Token::Comment, "# foo "),
                 ((29, 31), Token::Newline, "\r\n"),
-                ((31, 36), Token::Comment("#foo "), "#foo "),
+                ((31, 36), Token::Comment, "#foo "),
                 ((36, 37), Token::Newline, "\n"),
-                ((37, 38), Token::Whitespace(" "), " "),
+                ((37, 38), Token::Whitespace, " "),
             ],
         );
     }
