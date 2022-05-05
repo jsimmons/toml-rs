@@ -1737,7 +1737,7 @@ impl<'a> Deserializer<'a> {
 
         // Check for space separated date and time.
         let mut lookahead = self.tokens.clone();
-        if let Ok(Some((_, Token::Whitespace(" ")))) = lookahead.next() {
+        if let Ok(Some((_, Token::Whitespace))) = lookahead.next() {
             // Check if hour follows.
             if let Ok(Some((_, Token::Keylike(_)))) = lookahead.next() {
                 self.next()?; // skip space
