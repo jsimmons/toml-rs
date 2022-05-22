@@ -66,11 +66,6 @@ pub enum Error {
 #[derive(Clone)]
 pub struct Tokenizer<'a> {
     input: &'a str,
-    chars: CrlfFold<'a>,
-}
-
-#[derive(Clone)]
-struct CrlfFold<'a> {
     chars: str::CharIndices<'a>,
 }
 
@@ -84,9 +79,7 @@ impl<'a> Tokenizer<'a> {
     pub fn new(input: &'a str) -> Tokenizer<'a> {
         let mut t = Tokenizer {
             input,
-            chars: CrlfFold {
-                chars: input.char_indices(),
-            },
+            chars: input.char_indices(),
         };
         // Eat utf-8 BOM
         t.eatc('\u{feff}');
@@ -96,6 +89,12 @@ impl<'a> Tokenizer<'a> {
     pub fn next(&mut self) -> Result<Option<(Span, Token<'a>)>, Error> {
         let (start, token) = match self.one() {
             Some((start, '\n')) => (start, Newline),
+            Some((start, '\r')) => {
+                if !self.eatc('\n') {
+                    return Err(Error::Unexpected(start, '\r'));
+                }
+                (start, Newline)
+            }
             Some((start, ' ')) => (start, self.whitespace_token()),
             Some((start, '\t')) => (start, self.whitespace_token()),
             Some((start, '#')) => (start, self.comment_token()),
@@ -238,13 +237,20 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    pub fn skip_to_newline(&mut self) {
+    pub fn skip_to_newline(&mut self) -> Result<(), Error> {
         loop {
             match self.one() {
+                Some((i, '\r')) => match self.one() {
+                    Some((_, '\n')) => {
+                        break;
+                    }
+                    _ => return Err(Error::Unexpected(i, '\r')),
+                },
                 Some((_, '\n')) | None => break,
                 _ => {}
             }
         }
+        Ok(())
     }
 
     fn eatc(&mut self, ch: char) -> bool {
@@ -326,6 +332,24 @@ impl<'a> Tokenizer<'a> {
                         return Err(Error::NewlineInString(i));
                     }
                 }
+                Some((i, '\r')) => match self.one() {
+                    Some((i, '\n')) => {
+                        if multiline {
+                            if self.input.as_bytes()[i] == b'\r' {
+                                val.to_owned(&self.input[..i]);
+                            }
+                            if n == 1 {
+                                val = MaybeString::NotEscaped(self.current());
+                            } else {
+                                val.push('\n');
+                            }
+                            continue;
+                        } else {
+                            return Err(Error::NewlineInString(i));
+                        }
+                    }
+                    _ => return Err(Error::Unexpected(i, '\r')),
+                },
                 Some((mut i, ch)) if ch == delim => {
                     if multiline {
                         if !self.eatc(delim) {
@@ -385,13 +409,27 @@ impl<'a> Tokenizer<'a> {
                         let len = if c == 'u' { 4 } else { 8 };
                         val.push(me.hex(start, i, len)?);
                     }
-                    Some((i, c @ ' ')) | Some((i, c @ '\t')) | Some((i, c @ '\n')) if multi => {
+                    Some((i, c @ ' ')) | Some((i, c @ '\t')) | Some((i, c @ '\n'))
+                    | Some((i, c @ '\r'))
+                        if multi =>
+                    {
                         if c != '\n' {
                             while let Some((_, ch)) = me.chars.clone().next() {
                                 match ch {
                                     ' ' | '\t' => {
                                         me.chars.next();
                                         continue;
+                                    }
+                                    '\r' => {
+                                        me.chars.next();
+                                        match me.chars.next() {
+                                            Some((_, '\n')) => {
+                                                break;
+                                            }
+                                            _ => {
+                                                return Err(Error::Unexpected(i, '\r'));
+                                            }
+                                        }
                                     }
                                     '\n' => {
                                         me.chars.next();
@@ -403,7 +441,7 @@ impl<'a> Tokenizer<'a> {
                         }
                         while let Some((_, ch)) = me.chars.clone().next() {
                             match ch {
-                                ' ' | '\t' | '\n' => {
+                                ' ' | '\t' | '\r' | '\n' => {
                                     me.chars.next();
                                 }
                                 _ => break,
@@ -474,23 +512,6 @@ impl<'a> Tokenizer<'a> {
     /// Take one char.
     pub fn one(&mut self) -> Option<(usize, char)> {
         self.chars.next()
-    }
-}
-
-impl<'a> Iterator for CrlfFold<'a> {
-    type Item = (usize, char);
-
-    fn next(&mut self) -> Option<(usize, char)> {
-        self.chars.next().map(|(i, c)| {
-            if c == '\r' {
-                let mut attempt = self.chars.clone();
-                if let Some((_, '\n')) = attempt.next() {
-                    self.chars = attempt;
-                    return (i, '\n');
-                }
-            }
-            (i, c)
-        })
     }
 }
 
@@ -589,7 +610,7 @@ mod tests {
         t("'\"a'", "\"a", false);
         t("''''a'''", "'a", true);
         t("'''\n'a\n'''", "'a\n", true);
-        t("'''a\n'a\r\n'''", "a\n'a\n", true);
+        t("'''a\n'a\r\n'''", "a\n'a\r\n", true);
     }
 
     #[test]
@@ -635,7 +656,7 @@ mod tests {
         t(r#""""a\"""b""""#, "a\"\"\"b", true);
         err(r#""\a"#, Error::InvalidEscape(2, 'a'));
         err("\"\\\n", Error::InvalidEscape(2, '\n'));
-        err("\"\\\r\n", Error::InvalidEscape(2, '\n'));
+        err("\"\\\r", Error::InvalidEscape(2, '\r'));
         err("\"\\", Error::UnterminatedString(0));
         err("\"\u{0}", Error::InvalidCharInString(1, '\u{0}'));
         err(r#""\U00""#, Error::InvalidHexEscape(5, '"'));

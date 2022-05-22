@@ -1375,7 +1375,9 @@ impl<'a> Deserializer<'a> {
         let array = self.eat(Token::LeftBracket)?;
         let ret = Header::new(self.tokens.clone(), array, self.require_newline_after_table);
         if self.require_newline_after_table {
-            self.tokens.skip_to_newline();
+            self.tokens
+                .skip_to_newline()
+                .map_err(|e| self.token_error(e))?;
         } else {
             loop {
                 match self.next()? {
